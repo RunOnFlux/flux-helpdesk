@@ -1,0 +1,171 @@
+# Flux Helpdesk on one host with Docker Compose.
+#
+#   cp deploy/.env.example deploy/.env   # then fill it in
+#   docker compose -f deploy/compose.yaml --env-file deploy/.env up -d --build
+#
+# Follows frappe_docker's layout (github.com/frappe/frappe_docker): stateless
+# app containers sharing a "sites" volume, with MariaDB and Redis next to them.
+# The "migrate" service creates the site on first start and runs the database
+# migrations on every start after that, so an upgrade is: bump the version,
+# rebuild, `up -d`.
+
+x-app: &app
+  image: ${IMAGE:-flux-helpdesk}:${TAG:-local}
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+    args:
+      HELPDESK_VERSION: ${HELPDESK_VERSION:-v1.30.2}
+  platform: linux/amd64
+  restart: unless-stopped
+  volumes:
+    - sites:/home/frappe/frappe-bench/sites
+    - logs:/home/frappe/frappe-bench/logs
+  networks: [helpdesk]
+
+x-after-configure: &after_configure
+  depends_on:
+    configurator:
+      condition: service_completed_successfully
+
+services:
+  configurator:
+    <<: *app
+    restart: on-failure
+    entrypoint: ["bash", "-c"]
+    command:
+      - >
+        ls -1 apps > sites/apps.txt;
+        bench set-config -g db_host db;
+        bench set-config -gp db_port 3306;
+        bench set-config -g redis_cache "redis://redis-cache:6379";
+        bench set-config -g redis_queue "redis://redis-queue:6379";
+        bench set-config -g redis_socketio "redis://redis-queue:6379";
+        bench set-config -gp socketio_port 9000;
+    depends_on: {}
+
+  migrate:
+    <<: [*app, *after_configure]
+    restart: on-failure
+    entrypoint: ["bash", "-c"]
+    environment:
+      SITE_NAME: ${SITE_NAME:?set SITE_NAME in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
+      MUTE_EMAILS: ${MUTE_EMAILS:-0}
+    command:
+      - |
+        set -e
+        wait-for-it -t 120 db:3306
+        wait-for-it -t 120 redis-cache:6379
+        wait-for-it -t 120 redis-queue:6379
+        if [ ! -f "sites/$$SITE_NAME/.flux-site-ready" ]; then
+          # A half-created site from an earlier failed attempt is removed first.
+          rm -rf "sites/$$SITE_NAME"
+          bench new-site "$$SITE_NAME" \
+            --mariadb-user-host-login-scope='%' \
+            --admin-password="$$ADMIN_PASSWORD" \
+            --db-root-username=root \
+            --db-root-password="$$DB_ROOT_PASSWORD" \
+            --install-app helpdesk \
+            --install-app flux_helpdesk \
+            --set-default
+          touch "sites/$$SITE_NAME/.flux-site-ready"
+        else
+          bench --site "$$SITE_NAME" list-apps | grep -q flux_helpdesk \
+            || bench --site "$$SITE_NAME" install-app flux_helpdesk
+          bench --site "$$SITE_NAME" migrate
+        fi
+        bench --site "$$SITE_NAME" set-config -p mute_emails "$$MUTE_EMAILS"
+        echo "site ready"
+
+  backend:
+    <<: [*app, *after_configure]
+    environment:
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+      GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
+      GUNICORN_TIMEOUT: 120
+
+  websocket:
+    <<: [*app, *after_configure]
+    command: ["node", "/home/frappe/frappe-bench/apps/frappe/socketio.js"]
+
+  queue-short:
+    <<: [*app, *after_configure]
+    command: ["bench", "worker", "--queue", "short,default"]
+
+  queue-long:
+    <<: [*app, *after_configure]
+    command: ["bench", "worker", "--queue", "long,default,short"]
+
+  scheduler:
+    <<: [*app, *after_configure]
+    command: ["bench", "schedule"]
+
+  frontend:
+    <<: *app
+    command: ["nginx-entrypoint.sh"]
+    environment:
+      BACKEND: backend:8000
+      SOCKETIO: websocket:9000
+      FRAPPE_SITE_NAME_HEADER: ${SITE_NAME}
+      UPSTREAM_REAL_IP_ADDRESS: ${UPSTREAM_REAL_IP_ADDRESS:-127.0.0.1}
+      UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
+      UPSTREAM_REAL_IP_RECURSIVE: "off"
+      PROXY_READ_TIMEOUT: 120
+      CLIENT_MAX_BODY_SIZE: 50m
+    ports:
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:8080"
+    depends_on: [backend, websocket]
+
+  # Nightly database and files backup into the sites volume, 14 days kept.
+  # Copy sites/<site>/private/backups off the host as well; see docs/deploy.md.
+  backup:
+    <<: [*app, *after_configure]
+    entrypoint: ["bash", "-c"]
+    command:
+      - >
+        while true; do
+          sleep $${BACKUP_INTERVAL_SECONDS:-86400};
+          bench --site all backup --with-files --compress &&
+          find sites/*/private/backups -type f -mtime +14 -delete;
+        done
+
+  db:
+    image: mariadb:11.8
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - db-data:/var/lib/mysql
+    networks: [helpdesk]
+
+  redis-cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks: [helpdesk]
+
+  redis-queue:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-queue-data:/data
+    networks: [helpdesk]
+
+volumes:
+  db-data:
+  redis-queue-data:
+  sites:
+  logs:
+
+networks:
+  helpdesk:

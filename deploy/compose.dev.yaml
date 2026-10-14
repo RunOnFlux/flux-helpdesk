@@ -1,0 +1,26 @@
+# Local development: run the app from this checkout instead of the image copy.
+#
+#   docker compose -f deploy/compose.yaml -f deploy/compose.dev.yaml --env-file deploy/.env up -d
+#
+# Python changes need `docker compose ... restart backend queue-short queue-long`;
+# CSS, JS and templates are picked up on reload.
+
+x-source: &source
+  volumes:
+    - sites:/home/frappe/frappe-bench/sites
+    - logs:/home/frappe/frappe-bench/logs
+    - ../flux_helpdesk:/home/frappe/frappe-bench/apps/flux_helpdesk/flux_helpdesk
+
+services:
+  migrate:
+    <<: *source
+  backend:
+    <<: *source
+  queue-short:
+    <<: *source
+  queue-long:
+    <<: *source
+  scheduler:
+    <<: *source
+  frontend:
+    <<: *source

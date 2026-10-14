@@ -1,0 +1,147 @@
+{% extends "flux_helpdesk/templates/flux_base.html" %}
+
+{% block title %}Flux Support{% endblock %}
+
+{% block content %}
+<header class="site-header">
+  <div class="brand">
+    <a href="https://runonflux.com" aria-label="Flux home"><img src="/assets/flux_helpdesk/images/flux-logo-dark-bg.svg" alt="Flux" width="97" height="30"></a>
+    <span class="brand-divider" aria-hidden="true"></span>
+    <span class="brand-name">Support</span>
+  </div>
+  <nav class="site-nav" aria-label="Support">
+    <a href="/helpdesk/kb-public">Help centre</a>
+    <a href="/helpdesk/my-tickets">My tickets</a>
+    {% if discord_invite_url %}<a href="{{ discord_invite_url | e }}" rel="noopener">Community on Discord</a>{% endif %}
+    {% if status_page_url %}<a href="{{ status_page_url | e }}" rel="noopener">Network status</a>{% endif %}
+  </nav>
+  {% if logged_in %}
+  <a class="btn btn-ghost" href="/helpdesk/my-tickets">{{ (first_name or "Your account") | e }}</a>
+  {% else %}
+  <a class="btn btn-primary btn-cut" href="/login?redirect-to=/support">Sign in</a>
+  {% endif %}
+</header>
+
+<main class="page">
+  <section class="hero" aria-labelledby="hero-title">
+    <p class="eyebrow">Flux support</p>
+    <h1 id="hero-title">How can we help?</h1>
+    {% if ask_ai %}
+    <p class="lead">Ask the Flux AI first. It answers from our docs in seconds. If it can't fix the problem, you open a ticket with the conversation already attached, and a person takes it from there.</p>
+
+    <form id="ask-form" class="ask-panel" novalidate>
+      <label for="ask-input" class="ask-label">Describe the problem</label>
+      <div class="ask-row">
+        <input id="ask-input" name="question" type="text" maxlength="1000" autocomplete="off" required
+          placeholder="e.g. My game server has been stuck on “starting” since I renewed it">
+        <button type="submit" class="btn btn-primary btn-lg" id="ask-submit">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2z"/></svg>
+          Ask Flux AI
+        </button>
+      </div>
+      <div class="chips" role="group" aria-label="Product (optional)">
+        <span class="chips-label">Product (optional)</span>
+        {% for product in products %}
+        <button type="button" class="chip" aria-pressed="false" data-product="{{ product | e }}">{{ product | e }}</button>
+        {% endfor %}
+      </div>
+    </form>
+    {% else %}
+    <p class="lead">Search the help centre or open a ticket, and a person from the team will take it from there.</p>
+    <p><a class="btn btn-primary btn-lg" href="/helpdesk/my-tickets/new">Open a ticket</a></p>
+    {% endif %}
+  </section>
+
+  <section id="answer" class="answer" aria-labelledby="answer-title" hidden>
+    <div class="answer-head">
+      <span class="ai-badge" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2z"/></svg></span>
+      <h2 id="answer-title">Flux AI</h2>
+      <span class="answer-meta" id="answer-meta"></span>
+    </div>
+    <div id="answer-body" class="answer-body" aria-live="polite"></div>
+    <ul id="answer-sources" class="sources" hidden></ul>
+    <div class="answer-actions" id="answer-actions" hidden>
+      <span class="answer-question">Did this solve it?</span>
+      <button type="button" class="btn btn-ghost" id="answer-yes">Yes, thanks</button>
+      <button type="button" class="btn btn-primary" id="answer-no">No, open a ticket</button>
+      <span class="hint">Your question and this answer go with the ticket, so you won't have to repeat yourself.</span>
+    </div>
+
+    <form id="ticket-form" class="ticket-form" hidden novalidate>
+      <h3>Open a ticket</h3>
+      {% if logged_in %}
+      <label for="ticket-subject">Subject</label>
+      <input id="ticket-subject" type="text" maxlength="140" required>
+      <label for="ticket-details">What happened?</label>
+      <textarea id="ticket-details" rows="5" required></textarea>
+      <label class="check"><input type="checkbox" id="ticket-include-ai" checked> Attach the Flux AI answer</label>
+      <div class="ticket-actions">
+        <button type="submit" class="btn btn-primary" id="ticket-submit">Send to the team</button>
+        <span class="form-error" id="ticket-error" role="alert"></span>
+      </div>
+      {% else %}
+      <p>Sign in so we can reply to you and you can follow the ticket.</p>
+      <a class="btn btn-primary" id="ticket-login" href="/login?redirect-to=/support">Sign in to open a ticket</a>
+      {% endif %}
+    </form>
+  </section>
+
+  <div class="columns">
+    {% if logged_in %}
+    <section class="col-main" aria-labelledby="tickets-title">
+      <div class="section-head">
+        <h2 id="tickets-title">Your tickets</h2>
+        <a href="/helpdesk/my-tickets">View all</a>
+      </div>
+      {% if tickets %}
+      <ul class="ticket-list">
+        {% for t in tickets %}
+        <li>
+          <a class="ticket-row" href="/helpdesk/my-tickets/{{ t.name | e }}">
+            <span class="ticket-id">#{{ t.name | e }}</span>
+            <span class="ticket-subject">{{ t.subject | e }}</span>
+            <span class="ticket-meta">{% if t.flux_product %}{{ t.flux_product | e }} · {% endif %}{{ t.updated | e }}</span>
+            <span class="status status-{{ t.status_key }}">{{ t.status_label }}</span>
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="empty">No tickets yet. If the AI can't help, your ticket will show up here.</p>
+      {% endif %}
+    </section>
+    {% endif %}
+
+    <section class="col-side" aria-labelledby="popular-title">
+      <h2 id="popular-title">Popular in the help centre</h2>
+      {% if articles %}
+      <nav class="article-list" aria-label="Popular articles">
+        {% for a in articles %}
+        <a href="/helpdesk/kb-public/articles/{{ a.name | e }}">{{ a.title | e }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"/></svg></a>
+        {% endfor %}
+      </nav>
+      {% else %}
+      <p class="empty">Articles from the help centre will show up here.</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <aside class="trust">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    <p>Flux staff never DM you first, and nobody from Flux will ever ask for your seed phrase or private keys.</p>
+  </aside>
+</main>
+
+<footer class="site-footer">
+  <span>Flux · Decentralized cloud</span>
+  <nav aria-label="Legal">
+    <a href="https://runonflux.com/privacy-policy/">Privacy</a>
+    <a href="https://runonflux.com/terms-of-service/">Terms</a>
+  </nav>
+</footer>
+{% endblock %}
+
+{% block script %}
+<script>window.fluxSupport = { loggedIn: {{ "true" if logged_in else "false" }} };</script>
+<script src="/assets/flux_helpdesk/js/support.js?v={{ flux_version }}" defer></script>
+{% endblock %}

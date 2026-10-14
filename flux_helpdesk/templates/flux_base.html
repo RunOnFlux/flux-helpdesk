@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="{{ lang or 'en' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Flux Support{% endblock %}</title>
+  <meta name="description" content="{% block description %}Get help with FluxCloud, FluxNodes, Flux Games, ZelCore and SSP Wallet.{% endblock %}">
+  <meta name="theme-color" content="#0c0c18">
+  <meta name="csrf-token" content="{{ csrf_token or '' }}">
+  <link rel="icon" type="image/svg+xml" href="/assets/flux_helpdesk/images/flux-icon.svg">
+  <link rel="stylesheet" href="/assets/flux_helpdesk/css/support.css?v={{ flux_version }}">
+</head>
+<body>
+  {% block content %}{% endblock %}
+  {% block script %}{% endblock %}
+</body>
+</html>

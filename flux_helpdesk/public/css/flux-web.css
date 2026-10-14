@@ -1,0 +1,84 @@
+/*
+ * Flux look for Frappe's own website pages: login, password reset, invites.
+ * Loaded through web_include_css. The /support page and the Helpdesk app have
+ * their own styles and do not use this file.
+ */
+
+@font-face {
+  font-family: "Figtree";
+  font-weight: 300 900;
+  font-display: swap;
+  src: url("../fonts/figtree-latin-wght.woff2") format("woff2");
+}
+
+body {
+  background: #0c0c18;
+  color: #d1d2db;
+  font-family: "Figtree", ui-sans-serif, system-ui, sans-serif;
+}
+
+body h1,
+body h2,
+body h3,
+body h4,
+.page-card-head h4 {
+  color: #ffffff;
+}
+
+.page-card,
+.login-content.page-card {
+  background: #131320;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.form-control,
+.form-control:focus {
+  background: #0c0c18;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+}
+
+.form-control:focus {
+  border-color: #5679ff;
+  box-shadow: 0 0 0 3px rgba(86, 121, 255, 0.35);
+}
+
+.btn-primary,
+.btn-primary:focus {
+  background: #2656d7;
+  border-color: #2656d7;
+  color: #ffffff;
+  border-radius: 8px;
+}
+
+.btn-primary:hover {
+  background: #3463e3;
+  border-color: #3463e3;
+}
+
+.btn-default,
+.btn-secondary {
+  background: transparent;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+a,
+.sign-up-message a,
+.forgot-password-message a {
+  color: #7d93ff;
+}
+
+.text-muted,
+.login-divider {
+  color: #888a94 !important;
+}
+
+.navbar,
+.web-footer {
+  background: #0c0c18;
+  border-color: rgba(255, 255, 255, 0.08);
+}

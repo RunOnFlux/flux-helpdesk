@@ -1,0 +1,194 @@
+{
+ "actions": [],
+ "creation": "2026-10-14 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "theme_section",
+  "theme_enabled",
+  "default_dark",
+  "ai_section",
+  "knowledge_bot_url",
+  "knowledge_bot_api_key",
+  "column_break_ai",
+  "ask_ai_on_support_page",
+  "ask_ai_in_agent_view",
+  "discord_section",
+  "discord_enabled",
+  "discord_webhook_url",
+  "discord_guild_id",
+  "discord_role_id",
+  "column_break_discord",
+  "notify_new_ticket",
+  "notify_customer_reply",
+  "notify_urgent",
+  "support_page_section",
+  "support_products",
+  "column_break_support",
+  "discord_invite_url",
+  "status_page_url"
+ ],
+ "fields": [
+  {
+   "fieldname": "theme_section",
+   "fieldtype": "Section Break",
+   "label": "Theme"
+  },
+  {
+   "default": "1",
+   "description": "Gives the Helpdesk agent and customer app the Flux colours and fonts.",
+   "fieldname": "theme_enabled",
+   "fieldtype": "Check",
+   "label": "Use the Flux theme"
+  },
+  {
+   "default": "1",
+   "description": "People who never picked a theme start in dark mode. Anyone can still switch.",
+   "fieldname": "default_dark",
+   "fieldtype": "Check",
+   "label": "Dark mode by default"
+  },
+  {
+   "fieldname": "ai_section",
+   "fieldtype": "Section Break",
+   "label": "Knowledge bot"
+  },
+  {
+   "default": "https://ownllmrouter.app.runonflux.io",
+   "description": "Base address of the Flux docs assistant (github.com/RunOnFlux/ownllm). Its /ask endpoint answers questions.",
+   "fieldname": "knowledge_bot_url",
+   "fieldtype": "Data",
+   "label": "Knowledge bot URL"
+  },
+  {
+   "description": "Optional. With a key the bot skips its per-address limit, which matters because every question reaches it from this server's address.",
+   "fieldname": "knowledge_bot_api_key",
+   "fieldtype": "Password",
+   "label": "Knowledge bot API key"
+  },
+  {
+   "fieldname": "column_break_ai",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "ask_ai_on_support_page",
+   "fieldtype": "Check",
+   "label": "Ask AI on the support page"
+  },
+  {
+   "default": "1",
+   "fieldname": "ask_ai_in_agent_view",
+   "fieldtype": "Check",
+   "label": "Ask Flux AI button for agents"
+  },
+  {
+   "fieldname": "discord_section",
+   "fieldtype": "Section Break",
+   "label": "Discord"
+  },
+  {
+   "default": "0",
+   "fieldname": "discord_enabled",
+   "fieldtype": "Check",
+   "label": "Post tickets to Discord"
+  },
+  {
+   "depends_on": "discord_enabled",
+   "description": "A webhook on the team channel, e.g. #support-tickets. It is a secret: anyone with it can post there.",
+   "fieldname": "discord_webhook_url",
+   "fieldtype": "Password",
+   "label": "Webhook URL"
+  },
+  {
+   "depends_on": "discord_enabled",
+   "description": "Server ID, used to link each ticket to its Discord message.",
+   "fieldname": "discord_guild_id",
+   "fieldtype": "Data",
+   "label": "Discord server ID"
+  },
+  {
+   "depends_on": "discord_enabled",
+   "description": "Role pinged for urgent tickets. Leave empty for no ping.",
+   "fieldname": "discord_role_id",
+   "fieldtype": "Data",
+   "label": "Role to ping"
+  },
+  {
+   "fieldname": "column_break_discord",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "depends_on": "discord_enabled",
+   "fieldname": "notify_new_ticket",
+   "fieldtype": "Check",
+   "label": "New tickets"
+  },
+  {
+   "default": "1",
+   "depends_on": "discord_enabled",
+   "fieldname": "notify_customer_reply",
+   "fieldtype": "Check",
+   "label": "Customer replies"
+  },
+  {
+   "default": "1",
+   "depends_on": "discord_enabled",
+   "fieldname": "notify_urgent",
+   "fieldtype": "Check",
+   "label": "Tickets raised to Urgent"
+  },
+  {
+   "fieldname": "support_page_section",
+   "fieldtype": "Section Break",
+   "label": "Support page"
+  },
+  {
+   "default": "FluxCloud\nFluxNodes\nFluxEdge\nFlux Games\nFluxAI\nZelCore\nSSP Wallet",
+   "description": "One per line. Shown as product chips on /support and passed to the knowledge bot.",
+   "fieldname": "support_products",
+   "fieldtype": "Small Text",
+   "label": "Products"
+  },
+  {
+   "fieldname": "column_break_support",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "discord_invite_url",
+   "fieldtype": "Data",
+   "label": "Community Discord invite",
+   "options": "URL"
+  },
+  {
+   "fieldname": "status_page_url",
+   "fieldtype": "Data",
+   "label": "Network status page",
+   "options": "URL"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-10-14 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Flux Helpdesk",
+ "name": "Flux Helpdesk Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

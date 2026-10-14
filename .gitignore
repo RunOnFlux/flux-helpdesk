@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+node_modules/
+dist/
+build/
+.DS_Store
+
+# Deployment secrets and local data never belong in this repo.
+deploy/.env
+deploy/*.env
+!deploy/.env.example
+deploy/backups/
+*.sql
+*.sql.gz
+*.tar
+*.tgz
+freshdesk-export/

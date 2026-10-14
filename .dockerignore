@@ -1,0 +1,7 @@
+.git
+.github
+docs
+mcp
+deploy/.env
+**/__pycache__
+**/*.pyc

@@ -1,0 +1,156 @@
+/*
+ * Flux theme for Frappe Helpdesk (/helpdesk).
+ *
+ * Helpdesk is built on frappe-ui, which draws everything from CSS variables
+ * (--surface-*, --ink-*, --outline-*) and switches dark mode with
+ * [data-theme="dark"] on <html>. This file only overrides those variables, so
+ * the layout stays Helpdesk's own and upgrades do not break it.
+ *
+ * Flux palette (runonflux.com): base #0c0c18, panels #131320, text #d1d2db,
+ * muted #888a94, primary #2656d7, secondary #5679ff.
+ */
+
+@font-face {
+  font-family: "Figtree";
+  font-style: normal;
+  font-weight: 300 900;
+  font-display: swap;
+  src: url("../fonts/figtree-latin-wght.woff2") format("woff2-variations"),
+    url("../fonts/figtree-latin-wght.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Figtree";
+  font-style: normal;
+  font-weight: 300 900;
+  font-display: swap;
+  src: url("../fonts/figtree-latin-ext-wght.woff2") format("woff2-variations"),
+    url("../fonts/figtree-latin-ext-wght.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+    U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0,
+    U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/ibm-plex-mono-latin-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/ibm-plex-mono-latin-500.woff2") format("woff2");
+}
+
+:root {
+  --flux-primary: #2656d7;
+  --flux-primary-hover: #3463e3;
+  --flux-primary-active: #1e47b5;
+  --flux-secondary: #5679ff;
+  --flux-on-primary: #ffffff;
+}
+
+/* Figtree covers Latin; Inter (Helpdesk's own) still covers every other script. */
+html {
+  font-family: "Figtree", InterVar, ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji";
+}
+code,
+kbd,
+pre,
+samp,
+.font-mono {
+  font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* Light: Helpdesk's neutrals with a faint cool tint, Flux blue for links and focus. */
+:root {
+  --surface-gray-1: oklch(0.979 0.003 280);
+  --surface-gray-2: oklch(0.964 0.004 280);
+  --surface-gray-3: oklch(0.946 0.005 280);
+  --surface-gray-4: oklch(0.913 0.006 280);
+  --surface-sidebar: oklch(0.975 0.004 280);
+  --outline-gray-1: oklch(0.946 0.005 280);
+  --outline-gray-2: oklch(0.913 0.006 280);
+  --outline-gray-3: oklch(0.83 0.008 280);
+  --ink-gray-9: oklch(0.17 0.025 282);
+  --ink-gray-8: oklch(0.22 0.02 282);
+  --ink-blue-link: #2656d7;
+  --focus-default: 0 0 0 2px rgb(38 86 215 / 0.35);
+  --focus-outline-default: 2px solid rgb(38 86 215 / 0.55);
+}
+
+/* Dark: Flux navy surfaces. Lightness steps follow Helpdesk's, so contrast holds. */
+[data-theme="dark"] {
+  --surface-base: oklch(0.175 0.028 282);
+  --surface-gray-1: oklch(0.205 0.028 282);
+  --surface-gray-2: oklch(0.24 0.028 282);
+  --surface-gray-3: oklch(0.29 0.026 282);
+  --surface-gray-4: oklch(0.33 0.024 282);
+  --surface-gray-5: oklch(0.42 0.02 282);
+  --surface-gray-6: oklch(0.56 0.016 282);
+  --surface-gray-7: oklch(0.67 0.012 282);
+  --surface-gray-8: oklch(0.75 0.01 282);
+  --surface-gray-9: oklch(0.88 0.008 282);
+  --surface-gray-10: oklch(0.975 0.004 282);
+  --surface-sidebar: oklch(0.155 0.03 285);
+  --surface-elevation-1: oklch(0.205 0.028 282);
+  --surface-elevation-2: oklch(0.225 0.028 282);
+  --surface-elevation-3: oklch(0.29 0.026 282);
+  --surface-alpha-sidebar: oklch(0.155 0.03 285);
+
+  --ink-base: oklch(0.175 0.028 282);
+  --ink-gray-1: oklch(0.26 0.024 282);
+  --ink-gray-2: oklch(0.34 0.022 282);
+  --ink-gray-3: oklch(0.38 0.02 282);
+  --ink-gray-4: oklch(0.6 0.014 282);
+  --ink-gray-5: oklch(0.62 0.014 282);
+  --ink-gray-6: oklch(0.7 0.012 282);
+  --ink-gray-7: oklch(0.78 0.012 282);
+  --ink-gray-8: oklch(0.87 0.01 282);
+  --ink-gray-9: oklch(0.975 0.004 282);
+  --ink-blue-link: #7d93ff;
+
+  --outline-base: oklch(0.175 0.028 282);
+  --outline-gray-1: oklch(0.255 0.026 282);
+  --outline-gray-2: oklch(0.32 0.024 282);
+  --outline-gray-3: oklch(0.37 0.022 282);
+  --outline-gray-4: oklch(0.45 0.02 282);
+  --outline-gray-5: oklch(0.58 0.016 282);
+  --outline-elevation-1: oklch(0.27 0.026 282);
+  --outline-elevation-2: oklch(0.33 0.024 282);
+
+  --focus-default: 0 0 0 3px rgb(86 121 255 / 0.45);
+  --focus-outline-default: 3px solid rgb(86 121 255 / 0.55);
+}
+
+/*
+ * Primary buttons. frappe-ui's solid gray button is bg-surface-gray-10 (black
+ * in light mode, white in dark). Flux uses its blue in both.
+ */
+button.bg-surface-gray-10,
+a.bg-surface-gray-10 {
+  background-color: var(--flux-primary);
+  color: var(--flux-on-primary);
+}
+button.bg-surface-gray-10:hover,
+a.bg-surface-gray-10:hover {
+  background-color: var(--flux-primary-hover);
+}
+button.bg-surface-gray-10:active,
+a.bg-surface-gray-10:active {
+  background-color: var(--flux-primary-active);
+}
+button.bg-surface-gray-10 svg,
+a.bg-surface-gray-10 svg {
+  color: var(--flux-on-primary);
+}
+
+/* Links inside messages and articles. */
+.prose a,
+.ProseMirror a {
+  color: var(--ink-blue-link);
+}
