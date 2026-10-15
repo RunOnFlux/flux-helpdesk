@@ -12,6 +12,7 @@ What moves: help articles, groups (as teams), companies, contacts, tickets with
 their original numbers, every public reply and private note, tags, and
 optionally attachments. Each imported record remembers its Freshdesk ID, so
 running it again skips what is already there and picks up where it stopped.
+With `since`, tickets that were already imported are brought up to date too.
 
 Side effects are switched off while it runs: no emails, no assignment rules,
 no Discord posts. See docs/freshdesk-import.md.
@@ -21,7 +22,8 @@ import os
 from contextlib import contextmanager
 
 import frappe
-from frappe.utils import get_system_timezone
+from frappe.cache_manager import clear_doctype_map
+from frappe.utils import get_system_timezone, now_datetime
 
 from flux_helpdesk.importer import mapping
 from flux_helpdesk.importer.client import FreshdeskClient
@@ -52,7 +54,7 @@ def run(
         frappe.throw("Set freshdesk_domain and freshdesk_api_key in site config (or the environment).")
 
     importer = Importer(FreshdeskClient(domain, api_key), attachments=attachments, assign_open=assign_open)
-    with importing():
+    with importing(purge_queued_email=not allow_email):
         if articles:
             importer.import_articles(dry_run=dry_run)
         if tickets:
@@ -62,27 +64,49 @@ def run(
 
 
 @contextmanager
-def importing():
+def importing(purge_queued_email: bool = True):
     """Silence everything that should not fire for history: email, assignment, alerts."""
     flags = ("mute_emails", "in_import", "initial_sync", "flux_importing")
     saved = {flag: frappe.flags.get(flag) for flag in flags}
     for flag in flags:
         frappe.flags[flag] = True
+    started = now_datetime()
 
     rules = frappe.get_all(
         "Assignment Rule", filters={"document_type": "HD Ticket", "disabled": 0}, pluck="name"
     )
-    for rule in rules:
-        frappe.db.set_value("Assignment Rule", rule, "disabled", 1, update_modified=False)
-    frappe.db.commit()
+    _set_rules_disabled(rules, 1)
     try:
         yield
     finally:
-        for rule in rules:
-            frappe.db.set_value("Assignment Rule", rule, "disabled", 0, update_modified=False)
-        frappe.db.commit()
+        _set_rules_disabled(rules, 0)
+        if purge_queued_email:
+            _purge_email_queued_since(started)
         for flag, value in saved.items():
             frappe.flags[flag] = value
+
+
+def _set_rules_disabled(rules: list[str], disabled: int):
+    for rule in rules:
+        frappe.db.set_value("Assignment Rule", rule, "disabled", disabled, update_modified=False)
+    frappe.db.commit()
+    # Assignment rules are read from a cached list, which db.set_value does not clear.
+    clear_doctype_map("Assignment Rule", "HD Ticket")
+
+
+def _purge_email_queued_since(started):
+    """Muted email still lands in the Email Queue and goes out once the site is unmuted.
+
+    Nothing the import queues is meant for anyone, so drop it before that can happen.
+    """
+    queued = frappe.get_all(
+        "Email Queue", filters={"status": "Not Sent", "creation": [">=", started]}, pluck="name"
+    )
+    if queued:
+        frappe.db.delete("Email Queue Recipient", {"parent": ["in", queued]})
+        frappe.db.delete("Email Queue", {"name": ["in", queued]})
+        frappe.db.commit()
+        print(f"Removed {len(queued)} emails the import had queued.")
 
 
 class Importer:
@@ -94,6 +118,7 @@ class Importer:
         self.counts = {
             "tickets": 0,
             "tickets_skipped": 0,
+            "tickets_refreshed": 0,
             "replies": 0,
             "notes": 0,
             "contacts": 0,
@@ -129,7 +154,7 @@ class Importer:
                             "title": article["title"][:140],
                             "content": article.get("description") or "",
                             "category": category_name,
-                            "status": mapping.article_status(article.get("status")),
+                            "status": mapping.article_status(article.get("status"), folder.get("visibility")),
                             "published_on": mapping.to_site_time(article.get("created_at"), self.tz),
                             "freshdesk_id": article["id"],
                         }
@@ -155,24 +180,34 @@ class Importer:
     # Tickets --------------------------------------------------------------
 
     def import_tickets(self, limit: int | None = None, since: str | None = None, dry_run: bool = False):
+        if not dry_run:
+            self._reserve_numbers()
+        # A top-up (`since`) also brings already imported tickets up to date. A plain re-run
+        # skips them, so resuming a full import does not re-read every conversation.
+        refresh = bool(since)
         seen = 0
-        highest = 0
         for summary in self.client.tickets(updated_since=since or "2000-01-01T00:00:00Z"):
             if limit and seen >= limit:
                 break
             seen += 1
-            highest = max(highest, summary["id"])
             if dry_run:
                 self.counts["tickets"] += 1
                 continue
-            if frappe.db.exists("HD Ticket", {"freshdesk_id": summary["id"]}):
+            existing = frappe.db.get_value("HD Ticket", {"freshdesk_id": summary["id"]})
+            if existing and not refresh:
                 self.counts["tickets_skipped"] += 1
                 continue
             try:
-                self.import_ticket(summary)
+                if existing:
+                    self.refresh_ticket(existing, summary)
+                else:
+                    self.import_ticket(summary)
                 frappe.db.commit()
             except Exception:
                 frappe.db.rollback()
+                # Contacts and companies created in the rolled-back ticket are gone too.
+                self._contacts.clear()
+                self._companies.clear()
                 self.counts["errors"] += 1
                 frappe.log_error(title=f"Freshdesk import: ticket {summary['id']}")
             if seen % 50 == 0:
@@ -180,24 +215,43 @@ class Importer:
                     f"… {seen} tickets read, {self.counts['tickets']} imported, {self.client.calls} API calls"
                 )
 
-        if highest and not dry_run:
-            # Helpdesk names tickets from the ".####" series (empty prefix). Move it past the
-            # highest Freshdesk number so new tickets continue from there and never collide.
+    def _reserve_numbers(self):
+        """Keep every Freshdesk number free for its own ticket.
+
+        Helpdesk names tickets from the ".####" series (empty prefix). Moving it past the
+        newest Freshdesk number before importing means a ticket opened on the new desk
+        meanwhile cannot take a number an imported ticket needs. Helpdesk's sample
+        "Welcome to Helpdesk" ticket holds 0001, so it goes.
+        """
+        welcome = frappe.db.get_value(
+            "HD Ticket",
+            {"subject": "Welcome to Helpdesk", "raised_by": "john@example.com"},
+            ["name", "freshdesk_id"],
+            as_dict=True,
+        )
+        if welcome and not welcome.freshdesk_id:
+            frappe.delete_doc("HD Ticket", welcome.name, ignore_permissions=True, force=True)
+            print(f"Removed Helpdesk's sample ticket {welcome.name}.")
+        newest = self.client.newest_ticket_id()
+        if newest:
             frappe.db.sql(
                 """insert into `tabSeries` (name, current) values ('', %(n)s)
                    on duplicate key update current = greatest(current, %(n)s)""",
-                {"n": highest},
+                {"n": newest},
             )
-            frappe.db.commit()
+        frappe.db.commit()
 
     def import_ticket(self, ticket: dict):
         if "description" not in ticket:
             ticket = self.client.ticket(ticket["id"]) or ticket
+        name = mapping.ticket_name(ticket["id"])
+        if frappe.db.exists("HD Ticket", name):
+            raise frappe.ValidationError(
+                f"Ticket number {name} is already taken by a ticket not from Freshdesk"
+            )
 
         email, contact = self._contact(ticket.get("requester_id"))
-        status = mapping.status(ticket.get("status"))
-        if status not in self._statuses:
-            status = "Open"
+        status = self._status(ticket)
 
         doc = frappe.get_doc(
             {
@@ -215,36 +269,62 @@ class Importer:
         )
         doc.flags.ignore_permissions = True
         doc.flags.ignore_mandatory = True
-        doc.insert(set_name=mapping.ticket_name(ticket["id"]))
+        doc.insert(set_name=name)
         for tag in ticket.get("tags") or []:
             doc.add_tag(tag[:140])
 
         created = mapping.to_site_time(ticket.get("created_at"), self.tz)
         self._fix_first_message(doc.name, email, created)
         if self.attachments:
+            # The ticket list leaves attachments out; only the single-ticket view has them.
+            full = ticket if "attachments" in ticket else (self.client.ticket(ticket["id"]) or {})
             first = frappe.db.get_value(
                 "Communication", {"reference_doctype": "HD Ticket", "reference_name": doc.name}
             )
-            for attachment in ticket.get("attachments") or []:
+            for attachment in full.get("attachments") or []:
                 self._attach(attachment, "Communication", first, doc.name)
 
+        first_agent, last_agent, last_customer = self._conversations(
+            doc.name, doc.subject, email, ticket, created
+        )
+        self._finish(doc.name, ticket, status, created, first_agent, last_agent, last_customer)
+        if self.assign_open and status in ("Open", "Replied"):
+            self._assign(doc.name, ticket.get("responder_id"))
+        self.counts["tickets"] += 1
+
+    def refresh_ticket(self, name: str, ticket: dict):
+        """Bring an imported ticket up to date: new replies and notes, status, tags."""
+        doc = frappe.get_doc("HD Ticket", name)
+        created = mapping.to_site_time(ticket.get("created_at"), self.tz)
+        first_agent, last_agent, last_customer = self._conversations(
+            name, doc.subject, doc.raised_by, ticket, created
+        )
+        self._finish(name, ticket, self._status(ticket), created, first_agent, last_agent, last_customer)
+        present = set(doc.get_tags())
+        for tag in ticket.get("tags") or []:
+            if tag[:140] not in present:
+                doc.add_tag(tag[:140])
+        self.counts["tickets_refreshed"] += 1
+
+    def _conversations(self, ticket: str, subject: str, email: str, source: dict, created):
+        """Import the replies and notes not imported yet; return first/last response times."""
         last_customer, last_agent, first_agent = created, None, None
-        for conversation in self.client.conversations(ticket["id"]):
+        for conversation in self.client.conversations(source["id"]):
             when = mapping.to_site_time(conversation.get("created_at"), self.tz)
             if conversation.get("private"):
-                self._note(doc.name, conversation, when)
+                self._note(ticket, conversation, when)
                 continue
-            self._reply(doc.name, doc.subject, email, conversation, when)
+            self._reply(ticket, subject, email, conversation, when)
             if conversation.get("incoming"):
                 last_customer = when
             else:
                 last_agent = when
                 first_agent = first_agent or when
+        return first_agent, last_agent, last_customer
 
-        self._finish(doc.name, ticket, status, created, first_agent, last_agent, last_customer)
-        if self.assign_open and status in ("Open", "Replied"):
-            self._assign(doc.name, ticket.get("responder_id"))
-        self.counts["tickets"] += 1
+    def _status(self, ticket: dict) -> str:
+        status = mapping.status(ticket.get("status"))
+        return status if status in self._statuses else "Open"
 
     def _fix_first_message(self, ticket: str, email: str, created):
         """Helpdesk turns the description into the first message, sent "now" by the importing user."""
@@ -260,7 +340,11 @@ class Importer:
             return
         incoming = bool(conversation.get("incoming"))
         agent = self._agent(conversation.get("user_id"))
-        sender = conversation.get("from_email") or (customer_email if incoming else agent.get("email"))
+        if incoming:
+            sender = conversation.get("from_email") or customer_email
+        else:
+            # Show which agent answered; the email itself went out from the support mailbox.
+            sender = agent.get("email") or conversation.get("from_email")
         comm = frappe.new_doc("Communication")
         comm.update(
             {
@@ -288,7 +372,7 @@ class Importer:
                 self._attach(attachment, "Communication", comm.name, ticket)
 
     def _note(self, ticket: str, conversation: dict, when):
-        if frappe.db.exists("HD Ticket Comment", {"freshdesk_id": conversation["id"]}):
+        if frappe.db.exists("Comment", {"freshdesk_id": conversation["id"]}):
             return
         agent = self._agent(conversation.get("user_id"))
         user = (
@@ -300,13 +384,16 @@ class Importer:
         body = conversation.get("body") or conversation.get("body_text") or ""
         if user == "Administrator":
             body = f"<p><em>Note by {frappe.utils.escape_html(author)} in Freshdesk</em></p>{body}"
-        note = frappe.new_doc("HD Ticket Comment")
+        # Helpdesk 1.31+ keeps internal notes as core Comments on the ticket.
+        note = frappe.new_doc("Comment")
         note.update(
             {
-                "reference_ticket": ticket,
-                "commented_by": user,
+                "comment_type": "Comment",
+                "reference_doctype": "HD Ticket",
+                "reference_name": ticket,
+                "comment_email": user,
+                "comment_by": frappe.db.get_value("User", user, "full_name") or author,
                 "content": body,
-                "is_pinned": 0,
                 "freshdesk_id": conversation["id"],
             }
         )
@@ -345,7 +432,8 @@ class Importer:
             return
         from frappe.desk.form.assign_to import add
 
-        add({"assign_to": [email], "doctype": "HD Ticket", "name": ticket}, ignore_permissions=True)
+        # The import runs as Administrator, so the public API's permission check passes.
+        add({"assign_to": [email], "doctype": "HD Ticket", "name": ticket})
 
     # Lookups --------------------------------------------------------------
 

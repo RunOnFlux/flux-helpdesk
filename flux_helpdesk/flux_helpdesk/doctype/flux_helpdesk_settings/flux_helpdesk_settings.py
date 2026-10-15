@@ -31,3 +31,9 @@ class FluxHelpdeskSettings(Document):
 
         if self.discord_enabled and not self.discord_webhook_url:
             frappe.throw(_("Add the webhook URL before turning Discord on."))
+
+    def on_update(self):
+        if self.has_value_changed("support_products"):
+            from flux_helpdesk.setup.install import sync_product_options
+
+            sync_product_options()

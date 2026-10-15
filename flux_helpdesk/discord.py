@@ -104,12 +104,13 @@ def _wants(setting: str) -> bool:
     return bool(settings.discord_enabled and settings.get(setting))
 
 
-def _enqueue(event: str, ticket: str, communication: str | None = None):
+def _enqueue(kind: str, ticket: str, communication: str | None = None):
+    # Not "event": frappe.enqueue has its own parameter by that name and would swallow it.
     frappe.enqueue(
         "flux_helpdesk.discord.send_event",
         queue="short",
         enqueue_after_commit=True,
-        event=event,
+        kind=kind,
         ticket=ticket,
         communication=communication,
     )
@@ -151,7 +152,7 @@ def on_communication_insert(doc, method=None):
 # --------------
 
 
-def send_event(event: str, ticket: str, communication: str | None = None):
+def send_event(kind: str, ticket: str, communication: str | None = None):
     settings = get_settings()
     webhook = settings.get_password("discord_webhook_url", raise_exception=False)
     if not (settings.discord_enabled and webhook):
@@ -164,7 +165,7 @@ def send_event(event: str, ticket: str, communication: str | None = None):
         excerpt = html_to_text(doc.description, 600)
 
     payload = build_payload(
-        event,
+        kind,
         name=doc.name,
         subject=doc.subject,
         excerpt=excerpt,
@@ -172,12 +173,12 @@ def send_event(event: str, ticket: str, communication: str | None = None):
         team=doc.agent_group,
         priority=doc.priority,
         product=doc.get("flux_product"),
-        status=doc.status if event != "new" else None,
-        role_id=(settings.discord_role_id or None) if event == "urgent" else None,
+        status=doc.status if kind != "new" else None,
+        role_id=(settings.discord_role_id or None) if kind == "urgent" else None,
     )
     message = post_webhook(webhook, payload)
 
-    if event == "new" and message and doc.meta.has_field("flux_discord_url"):
+    if kind == "new" and message and doc.meta.has_field("flux_discord_url"):
         link = message_link(settings.discord_guild_id, message)
         if link:
             doc.db_set("flux_discord_url", link, update_modified=False)

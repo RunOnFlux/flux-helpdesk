@@ -15,17 +15,26 @@ x-app: &app
     context: ..
     dockerfile: deploy/Dockerfile
     args:
-      HELPDESK_VERSION: ${HELPDESK_VERSION:-v1.30.2}
+      HELPDESK_VERSION: ${HELPDESK_VERSION:-v1.31.0}
   platform: linux/amd64
   restart: unless-stopped
   volumes:
     - sites:/home/frappe/frappe-bench/sites
     - logs:/home/frappe/frappe-bench/logs
+    # Helpdesk downloads NLTK language data for article search on migrate; every
+    # container must see it, not only the one that downloaded it.
+    - nltk-data:/home/frappe/nltk_data
   networks: [helpdesk]
 
 x-after-configure: &after_configure
   depends_on:
     configurator:
+      condition: service_completed_successfully
+
+# The app only starts once migrations have run, so new code never meets an old schema.
+x-after-migrate: &after_migrate
+  depends_on:
+    migrate:
       condition: service_completed_successfully
 
 services:
@@ -42,26 +51,36 @@ services:
         bench set-config -g redis_queue "redis://redis-queue:6379";
         bench set-config -g redis_socketio "redis://redis-queue:6379";
         bench set-config -gp socketio_port 9000;
+        bench set-config -gp keep_backups_for_hours 336;
     depends_on: {}
 
   migrate:
     <<: [*app, *after_configure]
-    restart: on-failure
+    restart: "no"
     entrypoint: ["bash", "-c"]
     environment:
       SITE_NAME: ${SITE_NAME:?set SITE_NAME in .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
       DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
       MUTE_EMAILS: ${MUTE_EMAILS:-0}
+      ENABLE_SCHEDULER: ${ENABLE_SCHEDULER:-1}
     command:
       - |
         set -e
         wait-for-it -t 120 db:3306
         wait-for-it -t 120 redis-cache:6379
         wait-for-it -t 120 redis-queue:6379
+        if [ ! -f "sites/$$SITE_NAME/.flux-site-ready" ] \
+          && bench --site "$$SITE_NAME" list-apps 2>/dev/null | grep -q '^helpdesk' \
+          && bench --site "$$SITE_NAME" list-apps 2>/dev/null | grep -q '^flux_helpdesk'; then
+          # A complete site without our marker, e.g. restored from a backup: keep it.
+          touch "sites/$$SITE_NAME/.flux-site-ready"
+        fi
         if [ ! -f "sites/$$SITE_NAME/.flux-site-ready" ]; then
-          # A half-created site from an earlier failed attempt is removed first.
-          rm -rf "sites/$$SITE_NAME"
+          # A half-created site from an earlier failed attempt is moved aside, not deleted.
+          if [ -d "sites/$$SITE_NAME" ]; then
+            mv "sites/$$SITE_NAME" "sites/.failed-$$SITE_NAME-$$(date +%s)"
+          fi
           bench new-site "$$SITE_NAME" \
             --mariadb-user-host-login-scope='%' \
             --admin-password="$$ADMIN_PASSWORD" \
@@ -77,29 +96,35 @@ services:
           bench --site "$$SITE_NAME" migrate
         fi
         bench --site "$$SITE_NAME" set-config -p mute_emails "$$MUTE_EMAILS"
+        # New sites start with the scheduler off. Incoming email, SLAs and auto-close need it.
+        if [ "$$ENABLE_SCHEDULER" = "1" ]; then
+          bench --site "$$SITE_NAME" enable-scheduler
+        else
+          bench --site "$$SITE_NAME" disable-scheduler
+        fi
         echo "site ready"
 
   backend:
-    <<: [*app, *after_configure]
+    <<: [*app, *after_migrate]
     environment:
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
       GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
       GUNICORN_TIMEOUT: 120
 
   websocket:
-    <<: [*app, *after_configure]
+    <<: [*app, *after_migrate]
     command: ["node", "/home/frappe/frappe-bench/apps/frappe/socketio.js"]
 
   queue-short:
-    <<: [*app, *after_configure]
+    <<: [*app, *after_migrate]
     command: ["bench", "worker", "--queue", "short,default"]
 
   queue-long:
-    <<: [*app, *after_configure]
+    <<: [*app, *after_migrate]
     command: ["bench", "worker", "--queue", "long,default,short"]
 
   scheduler:
-    <<: [*app, *after_configure]
+    <<: [*app, *after_migrate]
     command: ["bench", "schedule"]
 
   frontend:
@@ -109,7 +134,9 @@ services:
       BACKEND: backend:8000
       SOCKETIO: websocket:9000
       FRAPPE_SITE_NAME_HEADER: ${SITE_NAME}
-      UPSTREAM_REAL_IP_ADDRESS: ${UPSTREAM_REAL_IP_ADDRESS:-127.0.0.1}
+      # Requests from the TLS proxy reach nginx from a Docker bridge address, never 127.0.0.1.
+      # nginx trusts X-Forwarded-For only from this range, so rate limits see real clients.
+      UPSTREAM_REAL_IP_ADDRESS: ${UPSTREAM_REAL_IP_ADDRESS:-172.16.0.0/12}
       UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
       UPSTREAM_REAL_IP_RECURSIVE: "off"
       PROXY_READ_TIMEOUT: 120
@@ -118,21 +145,22 @@ services:
       - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:8080"
     depends_on: [backend, websocket]
 
-  # Nightly database and files backup into the sites volume, 14 days kept.
-  # Copy sites/<site>/private/backups off the host as well; see docs/deploy.md.
+  # Database and files backup into the sites volume on start and then daily,
+  # 14 days kept (keep_backups_for_hours above). Copy sites/<site>/private/backups
+  # off the host as well; see docs/deploy.md.
   backup:
-    <<: [*app, *after_configure]
+    <<: [*app, *after_migrate]
     entrypoint: ["bash", "-c"]
     command:
       - >
         while true; do
-          sleep $${BACKUP_INTERVAL_SECONDS:-86400};
           bench --site all backup --with-files --compress &&
           find sites/*/private/backups -type f -mtime +14 -delete;
+          sleep $${BACKUP_INTERVAL_SECONDS:-86400};
         done
 
   db:
-    image: mariadb:11.8
+    image: mariadb:11.8.9
     restart: unless-stopped
     command:
       - --character-set-server=utf8mb4
@@ -149,13 +177,14 @@ services:
       - db-data:/var/lib/mysql
     networks: [helpdesk]
 
+  # Redis Stack: Helpdesk's help-article search needs the RediSearch module (FT.* commands).
   redis-cache:
-    image: redis:7-alpine
+    image: redis/redis-stack-server:7.4.0-v6
     restart: unless-stopped
     networks: [helpdesk]
 
   redis-queue:
-    image: redis:7-alpine
+    image: redis:7.4.11-alpine
     restart: unless-stopped
     volumes:
       - redis-queue-data:/data
@@ -166,6 +195,7 @@ volumes:
   redis-queue-data:
   sites:
   logs:
+  nltk-data:
 
 networks:
   helpdesk:

@@ -49,8 +49,14 @@ def to_site_time(value: str | None, site_tz) -> datetime | None:
     return parsed.astimezone(site_tz).replace(tzinfo=None)
 
 
-def article_status(code: int | None) -> str:
-    return "Published" if code == 2 else "Draft"
+def article_status(code: int | None, folder_visibility: int | None = 1) -> str:
+    """Only published articles in folders open to everyone become public.
+
+    Freshdesk folder visibility: 1 all users, 2 logged-in users, 3 agents only, 4 and up
+    selected companies or segments. Helpdesk has no such levels, and any published
+    article is readable by guests, so the rest stay drafts that agents can still see.
+    """
+    return "Published" if code == 2 and folder_visibility in (None, 1) else "Draft"
 
 
 def fallback_email(requester_id: int | None) -> str:

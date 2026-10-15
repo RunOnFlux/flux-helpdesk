@@ -19,10 +19,15 @@ from frappe.rate_limiter import rate_limit
 from flux_helpdesk.utils import get_settings, html_to_text, truncate
 
 MAX_QUESTION = 1000
-TIMEOUT = 90
+# Answers take about ten seconds. A guest request must not hold a web worker for long.
+TIMEOUT = 30
 # The bot cites its passages as [1], [2, 3]; the numbers mean nothing once
 # sources without a link are dropped, so the markers go.
 _CITATION = re.compile(r"\s*\[\d+(?:\s*,\s*\d+)*\]")
+
+
+def is_not_covered(answer: str) -> bool:
+    return answer.lower().startswith("not covered")
 
 
 def clean_answer(answer: str | None) -> str:
@@ -69,9 +74,11 @@ def ask_knowledge_bot(question: str) -> dict:
         frappe.throw(_("Flux AI could not answer this one. Please open a ticket instead."))
 
     data = response.json()
+    answer = clean_answer(data.get("answer"))
     return {
-        "answer": clean_answer(data.get("answer")),
-        "sources": clean_sources(data.get("sources")),
+        "answer": answer,
+        # The bot still lists its nearest passages when it found nothing; they only mislead.
+        "sources": [] if is_not_covered(answer) else clean_sources(data.get("sources")),
     }
 
 
@@ -112,5 +119,19 @@ def suggest_reply(ticket: str) -> dict:
         order_by="creation desc",
         limit=1,
     )
-    message = html_to_text(latest[0].content if latest else description, 1500)
-    return ask_knowledge_bot(f"{subject}\n\n{message}".strip())
+    return ask_knowledge_bot(
+        build_question(
+            subject, html_to_text(description, 2000), html_to_text(latest[0].content, 2000) if latest else ""
+        )
+    )
+
+
+def build_question(subject: str | None, opening: str, latest: str) -> str:
+    """The subject, the original problem and the newest customer message, within MAX_QUESTION.
+
+    A follow-up like "It stopped again." means nothing to the bot without the opening message.
+    """
+    parts = [(subject or "").strip(), truncate(opening.strip(), 500)]
+    if latest.strip() and latest.strip() != opening.strip():
+        parts.append(truncate(latest.strip(), 350))
+    return truncate("\n\n".join(part for part in parts if part), MAX_QUESTION)

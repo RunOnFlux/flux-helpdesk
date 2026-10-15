@@ -74,8 +74,13 @@ class HelpdeskClient:
 
     def _request(self, method: str, path: str, **kwargs):
         response = self.session.request(method, f"{self.url}{path}", timeout=60, **kwargs)
-        if response.status_code in (401, 403):
-            raise HelpdeskError("Helpdesk refused the API key (check the key and the user's Agent role).")
+        if response.status_code == 401:
+            raise HelpdeskError("Helpdesk refused the API key (check the key and secret).")
+        if response.status_code == 403:
+            raise HelpdeskError(
+                _server_message(response)
+                or "Not permitted (the API user needs the Agent role and access to this ticket's team)."
+            )
         if response.status_code == 404:
             raise HelpdeskError("Not found.")
         if not response.ok:
@@ -127,41 +132,37 @@ class HelpdeskClient:
         return rows
 
     def get_ticket(self, ticket: str) -> dict:
-        doc = self._request("GET", f"/api/resource/HD Ticket/{ticket}")["data"]
-        messages = self.get_list(
-            "Communication",
-            ["sender", "sent_or_received", "content", "communication_date"],
-            [["reference_doctype", "=", "HD Ticket"], ["reference_name", "=", ticket]],
-            order_by="communication_date asc",
-            limit_page_length=200,
-        )
-        notes = self.get_list(
-            "HD Ticket Comment",
-            ["commented_by", "content", "creation"],
-            [["reference_ticket", "=", ticket]],
-            order_by="creation asc",
-            limit_page_length=200,
-        )
+        # Helpdesk's own ticket endpoint applies its agent and team permissions, unlike
+        # /api/resource/Communication, which hides email messages from plain agents.
+        doc = self.call("helpdesk.helpdesk.doctype.hd_ticket.api.get_one", name=ticket)
+        assigned = doc.get("_assign")
         return {
             "ticket": {key: doc.get(key) for key in TICKET_FIELDS if key != "_assign"}
-            | {"description": html_to_text(doc.get("description"))},
+            | {
+                "assigned_to": json.loads(assigned) if isinstance(assigned, str) else assigned or [],
+                "description": html_to_text(doc.get("description")),
+            },
             "messages": [
                 {
-                    "from": m["sender"],
-                    "direction": "customer" if m["sent_or_received"] == "Received" else "agent",
-                    "at": m["communication_date"],
-                    "text": html_to_text(m["content"]),
+                    "from": m.get("sender"),
+                    "direction": "customer" if m.get("sent_or_received") == "Received" else "agent",
+                    "at": m.get("communication_date") or m.get("creation"),
+                    "text": html_to_text(m.get("content")),
                 }
-                for m in messages
+                for m in doc.get("communications") or []
             ],
             "internal_notes": [
-                {"by": n["commented_by"], "at": n["creation"], "text": html_to_text(n["content"])}
-                for n in notes
+                {"by": n.get("commented_by"), "at": n.get("creation"), "text": html_to_text(n.get("content"))}
+                for n in doc.get("comments") or []
             ],
         }
 
     def reply(self, ticket: str, message_html: str):
-        return self.run_doc_method("HD Ticket", ticket, "reply_via_agent", message=message_html)
+        # Helpdesk only emails the addresses in `to`; its own reply box fills in the customer.
+        raised_by = self._request("GET", f"/api/resource/HD Ticket/{ticket}")["data"].get("raised_by")
+        if not raised_by:
+            raise HelpdeskError(f"Ticket {ticket} has no customer email to reply to.")
+        return self.run_doc_method("HD Ticket", ticket, "reply_via_agent", message=message_html, to=raised_by)
 
     def add_note(self, ticket: str, note_html: str):
         return self.run_doc_method("HD Ticket", ticket, "new_comment", content=note_html)

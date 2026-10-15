@@ -24,8 +24,9 @@ To connect it to Helpdesk:
 2. Generate API keys for that user (User → Settings → API Access).
 3. Give the bot the site URL and the key and secret. Its Helpdesk connector uses:
    - `GET /api/resource/HD Ticket`: open, unassigned tickets
-   - `GET /api/resource/Communication`: the conversation
-   - `run_doc_method` `reply_via_agent` / `new_comment`: reply or private note
+   - `POST /api/method/helpdesk.helpdesk.doctype.hd_ticket.api.get_one` with `name`: the ticket with its conversation (`communications`) and internal notes (`comments`). Do not read `/api/resource/Communication` directly: for an agent without System Manager it hides every email message.
+   - `run_doc_method` `reply_via_agent` with `message` **and `to`** (the ticket's `raised_by`): Helpdesk only emails the addresses in `to`, so a reply without it is stored but never sent
+   - `run_doc_method` `new_comment` with `content`: private note
    - `PUT /api/resource/HD Ticket/<id>`: status, priority, team, tags
 
 The [MCP server](../mcp/README.md) wraps the same calls, if you want Claude to work tickets directly.
