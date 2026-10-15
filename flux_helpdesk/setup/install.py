@@ -5,7 +5,7 @@ import os
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
-from flux_helpdesk.utils import DEFAULT_PRODUCTS
+from flux_helpdesk.utils import DEFAULT_PRODUCTS, parse_products
 
 FORM_SCRIPT_NAME = "Flux: Ask Flux AI"
 BRAND_NAME = "Flux Support"
@@ -28,6 +28,31 @@ def apply():
     frappe.clear_cache(doctype="HD Ticket")
 
 
+def product_options() -> str:
+    """Every product a ticket can carry: the defaults, the support page's list, and any in use.
+
+    Values already on tickets stay valid even after they are taken off the support page.
+    """
+    configured = []
+    in_use = []
+    if frappe.db.exists("DocType", "Flux Helpdesk Settings"):
+        configured = parse_products(frappe.db.get_single_value("Flux Helpdesk Settings", "support_products"))
+    if frappe.db.has_column("HD Ticket", "flux_product"):
+        in_use = frappe.db.sql_list(
+            "select distinct flux_product from `tabHD Ticket` where ifnull(flux_product, '') != ''"
+        )
+    products = dict.fromkeys([*DEFAULT_PRODUCTS, *configured, "eckoWALLET", *in_use, "Other"])
+    return "\n" + "\n".join(products)
+
+
+def sync_product_options():
+    """Called when the product list in Flux Helpdesk Settings changes."""
+    field = frappe.db.get_value("Custom Field", {"dt": "HD Ticket", "fieldname": "flux_product"})
+    if field:
+        frappe.db.set_value("Custom Field", field, "options", product_options())
+        frappe.clear_cache(doctype="HD Ticket")
+
+
 def freshdesk_id_field(insert_after: str) -> dict:
     return {
         "fieldname": "freshdesk_id",
@@ -48,7 +73,7 @@ def custom_fields() -> dict:
                 "fieldname": "flux_product",
                 "label": "Product",
                 "fieldtype": "Select",
-                "options": "\n" + "\n".join([*DEFAULT_PRODUCTS, "eckoWALLET", "Other"]),
+                "options": product_options(),
                 "insert_after": "ticket_type",
                 "in_standard_filter": 1,
             },
@@ -71,7 +96,7 @@ def custom_fields() -> dict:
             freshdesk_id_field("flux_discord_url"),
         ],
         "Communication": [freshdesk_id_field("reference_name")],
-        "HD Ticket Comment": [freshdesk_id_field("reference_ticket")],
+        "Comment": [freshdesk_id_field("reference_name")],
         "Contact": [freshdesk_id_field("email_id")],
         "HD Customer": [freshdesk_id_field("domain")],
         "HD Article": [freshdesk_id_field("category")],

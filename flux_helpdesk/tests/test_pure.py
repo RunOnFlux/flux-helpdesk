@@ -1,15 +1,39 @@
 """Tests that need no site. They run under pytest and under `bench run-tests`."""
 
+import inspect
 import unittest
+from unittest import mock
 from zoneinfo import ZoneInfo
 
-from flux_helpdesk.ai import clean_sources
+from flux_helpdesk import discord
+from flux_helpdesk.ai import MAX_QUESTION, build_question, clean_sources, is_not_covered
 from flux_helpdesk.discord import build_payload, escape_markdown, message_link
 from flux_helpdesk.importer import mapping
 from flux_helpdesk.theme import MARKER, add_theme_tags, is_helpdesk_page
 from flux_helpdesk.utils import html_to_text, parse_products, truncate
 
 PAGE = "<html><head><title>Helpdesk</title></head><body><div id=app></div></body></html>"
+
+
+class TestAgentQuestion(unittest.TestCase):
+    def test_follow_up_keeps_the_original_problem(self):
+        question = build_question(
+            "Node not confirming", "My node stopped after the IP change.", "It stopped again."
+        )
+        self.assertIn("Node not confirming", question)
+        self.assertIn("IP change", question)
+        self.assertTrue(question.endswith("It stopped again."))
+
+    def test_first_message_is_not_repeated(self):
+        question = build_question("Subject", "Same text", "Same text")
+        self.assertEqual(question.count("Same text"), 1)
+
+    def test_not_covered_is_recognised(self):
+        self.assertTrue(is_not_covered("Not covered in the documentation."))
+        self.assertFalse(is_not_covered("Update the IP in ZelCore, then start the node again."))
+
+    def test_stays_within_the_limit(self):
+        self.assertLessEqual(len(build_question("s" * 300, "o" * 3000, "l" * 3000)), MAX_QUESTION)
 
 
 class TestTheme(unittest.TestCase):
@@ -68,6 +92,19 @@ class TestDiscord(unittest.TestCase):
         self.assertNotIn("description", embed)
         self.assertEqual([f["name"] for f in embed["fields"]], ["Priority"])
 
+    def test_job_receives_every_argument(self):
+        # frappe.enqueue keeps these keyword arguments for itself; anything else reaches the job.
+        reserved = {
+            "queue", "timeout", "event", "is_async", "job_name", "now", "enqueue_after_commit",
+            "on_success", "on_failure", "at_front", "job_id", "deduplicate",
+        }  # fmt: skip
+        calls = []
+        with mock.patch.object(discord.frappe, "enqueue", lambda method, **kw: calls.append(kw), create=True):
+            discord._enqueue("urgent", "15942")
+        job_kwargs = {k: v for k, v in calls[0].items() if k not in reserved}
+        bound = inspect.signature(discord.send_event).bind(**job_kwargs)
+        self.assertEqual(bound.arguments["kind"], "urgent")
+
     def test_message_link(self):
         message = {"channel_id": "2", "id": "3"}
         self.assertEqual(message_link("1", message), "https://discord.com/channels/1/2/3")
@@ -122,3 +159,8 @@ class TestImportMapping(unittest.TestCase):
     def test_article_status(self):
         self.assertEqual(mapping.article_status(2), "Published")
         self.assertEqual(mapping.article_status(1), "Draft")
+
+    def test_restricted_folders_stay_internal(self):
+        self.assertEqual(mapping.article_status(2, 1), "Published")
+        for visibility in (2, 3, 4, 5, 6, 7):
+            self.assertEqual(mapping.article_status(2, visibility), "Draft")

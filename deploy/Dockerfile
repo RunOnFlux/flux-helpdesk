@@ -8,7 +8,7 @@
 # migrate service in compose.yaml run. Nothing of Helpdesk is modified.
 
 ARG HELPDESK_IMAGE=ghcr.io/frappe/helpdesk
-ARG HELPDESK_VERSION=v1.30.2
+ARG HELPDESK_VERSION=v1.31.0
 FROM ${HELPDESK_IMAGE}:${HELPDESK_VERSION}
 
 USER frappe
@@ -19,9 +19,11 @@ COPY --chown=frappe:0 flux_helpdesk apps/flux_helpdesk/flux_helpdesk
 
 # The image keeps built assets in ./assets and links them into the sites
 # volume on start, so our static files only need a link there. No JS build.
+# nltk_data is created here so the volume compose.yaml mounts on it is owned by frappe.
 RUN ./env/bin/pip install --no-cache-dir -e apps/flux_helpdesk \
   && ln -sfn /home/frappe/frappe-bench/apps/flux_helpdesk/flux_helpdesk/public \
-       /home/frappe/frappe-bench/assets/flux_helpdesk
+       /home/frappe/frappe-bench/assets/flux_helpdesk \
+  && mkdir -p /home/frappe/nltk_data
 
 LABEL org.opencontainers.image.source="https://github.com/RunOnFlux/flux-helpdesk" \
       org.opencontainers.image.description="Frappe Helpdesk with the Flux add-on" \

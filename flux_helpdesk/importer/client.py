@@ -67,6 +67,18 @@ class FreshdeskClient:
             },
         )
 
+    def newest_ticket_id(self) -> int:
+        newest = self.get(
+            "/tickets",
+            {
+                "updated_since": "2000-01-01T00:00:00Z",
+                "order_by": "created_at",
+                "order_type": "desc",
+                "per_page": 1,
+            },
+        )
+        return int(newest[0]["id"]) if newest else 0
+
     def ticket(self, ticket_id: int) -> dict | None:
         return self.get(f"/tickets/{ticket_id}")
 

@@ -3,7 +3,7 @@
 ## Helpdesk (every few weeks)
 
 1. Read the release notes: https://github.com/frappe/helpdesk/releases
-2. Set `HELPDESK_VERSION` in `deploy/.env` (for example `v1.31.0`) and update the default in `deploy/Dockerfile` and `deploy/compose.yaml` in the same pull request.
+2. Set `HELPDESK_VERSION` in `deploy/.env` (for example `v1.32.0`) and update the default in `deploy/Dockerfile` and `deploy/compose.yaml` in the same pull request.
 3. On staging, back up first, then rebuild and start: `docker compose … up -d --build`. The `migrate` service runs the database migrations and re-applies our custom fields and the agent button.
 4. Check:
    - `/support` loads, Ask Flux AI answers.

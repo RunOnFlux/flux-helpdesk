@@ -65,14 +65,61 @@ def test_doc_method_sends_kwargs_as_json():
 
 def test_server_message_becomes_error():
     messages = json.dumps([json.dumps({"message": "Unable to send email."})])
-    client, _ = make([FakeResponse(417, {"_server_messages": messages})])
+    client, _ = make(
+        [
+            FakeResponse(payload={"data": {"raised_by": "c@example.com"}}),
+            FakeResponse(417, {"_server_messages": messages}),
+        ]
+    )
     with pytest.raises(HelpdeskError, match="Unable to send email"):
         client.reply("0003", "<p>x</p>")
 
 
+def test_reply_is_addressed_to_the_customer():
+    client, session = make(
+        [FakeResponse(payload={"data": {"raised_by": "c@example.com"}}), FakeResponse(payload={})]
+    )
+    client.reply("0003", "<p>x</p>")
+    _, url, kwargs = session.requests[1]
+    assert url.endswith("/api/method/run_doc_method")
+    assert kwargs["json"]["method"] == "reply_via_agent"
+    assert json.loads(kwargs["json"]["args"]) == {"message": "<p>x</p>", "to": "c@example.com"}
+
+
+def test_get_ticket_reads_helpdesk_ticket_view():
+    payload = {
+        "message": {
+            "name": "0003",
+            "subject": "Node down",
+            "raised_by": "c@example.com",
+            "_assign": '["a@x.io"]',
+            "description": "<p>Help</p>",
+            "communications": [
+                {"sender": "c@example.com", "sent_or_received": "Received", "content": "<p>Help</p>"},
+                {"sender": "a@x.io", "sent_or_received": "Sent", "content": "<p>On it</p>"},
+            ],
+            "comments": [{"commented_by": "a@x.io", "creation": "2026-10-15", "content": "<p>note</p>"}],
+        }
+    }
+    client, session = make([FakeResponse(payload=payload)])
+    ticket = client.get_ticket("0003")
+    method, url, kwargs = session.requests[0]
+    assert url.endswith("/api/method/helpdesk.helpdesk.doctype.hd_ticket.api.get_one")
+    assert kwargs["json"] == {"name": "0003"}
+    assert ticket["ticket"]["assigned_to"] == ["a@x.io"]
+    assert [m["direction"] for m in ticket["messages"]] == ["customer", "agent"]
+    assert ticket["internal_notes"] == [{"by": "a@x.io", "at": "2026-10-15", "text": "note"}]
+
+
 def test_auth_failure_is_explained():
-    client, _ = make([FakeResponse(403)])
+    client, _ = make([FakeResponse(401)])
     with pytest.raises(HelpdeskError, match="API key"):
+        client.get_ticket("1")
+
+
+def test_permission_failure_is_not_blamed_on_the_key():
+    client, _ = make([FakeResponse(403)])
+    with pytest.raises(HelpdeskError, match="Not permitted"):
         client.get_ticket("1")
 
 

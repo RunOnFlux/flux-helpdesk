@@ -35,7 +35,7 @@ bench get-app https://github.com/RunOnFlux/flux-helpdesk
 bench --site your.site install-app flux_helpdesk
 ```
 
-Helpdesk must already be installed on the site (it is a required app).
+Helpdesk 1.31 or later must already be installed on the site (it is a required app). Earlier versions kept internal notes in a separate table, which the importer and the MCP server no longer read.
 
 ## Settings
 
